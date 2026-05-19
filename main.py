@@ -44,26 +44,33 @@ if c_id and a_key:
     headers = {"Client-Id": c_id, "Api-Key": a_key, "Content-Type": "application/json"}
     
     try:
-        # 1. Получаем список товаров
+        # 1. Получаем список товаров (v3)
         res = requests.post("https://api-seller.ozon.ru/v3/product/list", 
                              headers=headers, json={"filter": {"visibility": "ALL"}, "limit": 100})
         
         if res.status_code == 200:
             items = res.json().get('result', {}).get('items', [])
-            product_ids = [str(i['product_id']) for i in items]
             
-            if not product_ids:
+            # Собираем список словарей с product_id, как требует v3/product/info/list
+            products_requested = [{"product_id": int(i['product_id'])} for i in items]
+            
+            if not products_requested:
                 st.warning("В вашем кабинете не найдено товаров.")
             else:
-                # 2. Получаем детали (делаем запрос более безопасным)
-                res_details = requests.post("https://api-seller.ozon.ru/v2/product/info/list", 
-                                             headers=headers, json={"product_id": product_ids})
+                # 2. Получаем детали через СВЕЖИЙ МЕТОД v3
+                payload_details = {"product_id": [], "sku": [], "offer_id": []}
+                # Передаем список product_id напрямую
+                product_ids_only = [int(i['product_id']) for i in items]
+                
+                res_details = requests.post("https://api-seller.ozon.ru/v3/product/info/list", 
+                                             headers=headers, json={"product_id": product_ids_only})
                 
                 if res_details.status_code == 200:
                     details = res_details.json().get('result', {}).get('items', [])
                     final_data = []
                     
                     for p in details:
+                        # У Ozon v3 цены лежат в блоке price или marketing_price
                         price = float(p.get('marketing_price') or p.get('price') or 0)
                         if price <= 0: continue
                         
@@ -101,7 +108,7 @@ if c_id and a_key:
                     
                     if final_data:
                         df = pd.DataFrame(final_data)
-                        st.success(f"🔥 Успешно рассчитано товаров: {len(df)}")
+                        st.success(f"🔥 Успешно рассчитано товаров: {len(df)} (через API v3)")
                         
                         col1, col2 = st.columns(2)
                         col1.metric("Средняя чистая прибыль", f"{round(df['Прибыль'].mean(), 1)} ₽")
@@ -111,8 +118,8 @@ if c_id and a_key:
                     else:
                         st.warning("Товары найдены, но у них не заданы цены в кабинете.")
                 else:
-                    st.error(f"❌ Ozon отказался выдать детали. Код ответа: {res_details.status_code}")
-                    st.text(f"Ответ сервера: {res_details.text}") # Показывает точную причину ошибки
+                    st.error(f"❌ Ozon отказался выдать детали по методу v3. Код ответа: {res_details.status_code}")
+                    st.text(f"Ответ сервера: {res_details.text}")
         else:
             st.error(f"Ошибка получения списка товаров: {res.status_code}")
             
