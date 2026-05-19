@@ -90,7 +90,6 @@ if c_id and a_key:
                 df = pd.DataFrame(final_data)
                 st.dataframe(df.sort_values("ROI %", ascending=False), use_container_width=True)
                 st.info("💡  Логистика рассчитана автоматически на основе веса и объема из карточек товаров.")
-
 except Exception as e:
         st.error(f"Ошибка: {e}")
 else:
