@@ -50,18 +50,12 @@ if c_id and a_key:
         
         if res.status_code == 200:
             items = res.json().get('result', {}).get('items', [])
+            product_ids_only = [int(i['product_id']) for i in items]
             
-            # Собираем список словарей с product_id, как требует v3/product/info/list
-            products_requested = [{"product_id": int(i['product_id'])} for i in items]
-            
-            if not products_requested:
+            if not product_ids_only:
                 st.warning("В вашем кабинете не найдено товаров.")
             else:
-                # 2. Получаем детали через СВЕЖИЙ МЕТОД v3
-                payload_details = {"product_id": [], "sku": [], "offer_id": []}
-                # Передаем список product_id напрямую
-                product_ids_only = [int(i['product_id']) for i in items]
-                
+                # 2. Получаем детали через метод v3
                 res_details = requests.post("https://api-seller.ozon.ru/v3/product/info/list", 
                                              headers=headers, json={"product_id": product_ids_only})
                 
@@ -70,9 +64,22 @@ if c_id and a_key:
                     final_data = []
                     
                     for p in details:
-                        # У Ozon v3 цены лежат в блоке price или marketing_price
-                        price = float(p.get('marketing_price') or p.get('price') or 0)
-                        if price <= 0: continue
+                        # УПРАВЛЕНИЕ ПОИСКОМ ЦЕНЫ В V3 (ищем везде, где она может лежать)
+                        price = 0.0
+                        
+                        # Вариант 1: Из общего поля price
+                        if p.get('price'):
+                            price = float(p.get('price'))
+                        # Вариант 2: Из маркетинговой цены
+                        elif p.get('marketing_price'):
+                            price = float(p.get('marketing_price'))
+                        # Вариант 3: Из вложенного блока индексов цен Ozon
+                        elif p.get('price_indexes') and p.get('price_indexes').get('price_without_commission'):
+                            price = float(p['price_indexes']['price_without_commission'].get('price', 0))
+                        
+                        # Если цену так и не нашли или товар архивный без цены — пропускаем
+                        if price <= 0:
+                            continue
                         
                         # ГАБАРИТЫ
                         vol_l = (p.get('height', 0) * p.get('width', 0) * p.get('depth', 0)) / 1000
@@ -98,8 +105,8 @@ if c_id and a_key:
                         
                         final_data.append({
                             "Артикул": p.get('offer_id'),
-                            "Название": p.get('name')[:20] + "...",
-                            "Цена": price,
+                            "Название": p.get('name')[:25] + "...",
+                            "Цена": round(price, 2),
                             "Логистика": round(item_logistics, 1),
                             "Реклама": round(item_marketing, 1),
                             "Прибыль": round(net_profit, 1),
@@ -108,7 +115,7 @@ if c_id and a_key:
                     
                     if final_data:
                         df = pd.DataFrame(final_data)
-                        st.success(f"🔥 Успешно рассчитано товаров: {len(df)} (через API v3)")
+                        st.success(f"🔥 Успешно рассчитано товаров: {len(df)}")
                         
                         col1, col2 = st.columns(2)
                         col1.metric("Средняя чистая прибыль", f"{round(df['Прибыль'].mean(), 1)} ₽")
@@ -116,10 +123,12 @@ if c_id and a_key:
                         
                         st.dataframe(df.sort_values("ROI %", ascending=False), use_container_width=True)
                     else:
-                        st.warning("Товары найдены, но у них не заданы цены в кабинете.")
+                        st.warning("Товары обработаны, но алгоритм не смог считать цены из структуры v3. Проверяю альтернативные поля...")
+                        # Показываем структуру первого товара для отладки, если таблица пуста
+                        if details:
+                            st.json(details[0])
                 else:
-                    st.error(f"❌ Ozon отказался выдать детали по методу v3. Код ответа: {res_details.status_code}")
-                    st.text(f"Ответ сервера: {res_details.text}")
+                    st.error(f"❌ Код ответа деталей: {res_details.status_code}")
         else:
             st.error(f"Ошибка получения списка товаров: {res.status_code}")
             
