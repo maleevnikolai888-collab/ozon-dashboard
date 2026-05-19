@@ -64,20 +64,35 @@ if c_id and a_key:
                     final_data = []
                     
                     for p in details:
-                        # УПРАВЛЕНИЕ ПОИСКОМ ЦЕНЫ В V3 (ищем везде, где она может лежать)
-                        price = 0.0
+                        raw_price = 0.0
                         
-                        # Вариант 1: Из общего поля price
-                        if p.get('price'):
-                            price = float(p.get('price'))
-                        # Вариант 2: Из маркетинговой цены
-                        elif p.get('marketing_price'):
-                            price = float(p.get('marketing_price'))
-                        # Вариант 3: Из вложенного блока индексов цен Ozon
-                        elif p.get('price_indexes') and p.get('price_indexes').get('price_without_commission'):
-                            price = float(p['price_indexes']['price_without_commission'].get('price', 0))
+                        # --- СВЕРХНАДЕЖНЫЙ ПАРСЕР ЦЕНЫ ДЛЯ V3 ---
+                        # Вариант А: Если price — это вложенный словарь (Новый стандарт Ozon v3)
+                        if isinstance(p.get('price'), dict):
+                            price_dict = p.get('price', {})
+                            raw_price = price_dict.get('marketing_price') or price_dict.get('price') or price_dict.get('computed_price')
                         
-                        # Если цену так и не нашли или товар архивный без цены — пропускаем
+                        # Вариант Б: Если price — это просто строка или число на верхнем уровне
+                        if not raw_price and p.get('price'):
+                            raw_price = p.get('price')
+                            
+                        # Вариант В: Проверяем marketing_price на верхнем уровне
+                        if not raw_price and p.get('marketing_price'):
+                            raw_price = p.get('marketing_price')
+                            
+                        # Вариант Г: Если запрятано в индексы
+                        if not raw_price and p.get('price_indexes'):
+                            idx = p.get('price_indexes', {})
+                            if idx.get('price_without_commission'):
+                                raw_price = idx['price_without_commission'].get('price')
+
+                        # Преобразуем то, что нашли, в число
+                        try:
+                            price = float(raw_price) if raw_price else 0.0
+                        except:
+                            price = 0.0
+                        
+                        # Если цену так и не вытащили — пропускаем позицию
                         if price <= 0:
                             continue
                         
@@ -124,7 +139,6 @@ if c_id and a_key:
                         st.dataframe(df.sort_values("ROI %", ascending=False), use_container_width=True)
                     else:
                         st.warning("Товары обработаны, но алгоритм не смог считать цены из структуры v3. Проверяю альтернативные поля...")
-                        # Показываем структуру первого товара для отладки, если таблица пуста
                         if details:
                             st.json(details[0])
                 else:
